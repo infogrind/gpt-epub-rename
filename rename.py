@@ -44,12 +44,21 @@ the JSON output should be:
   [ 
     [
       "Jill_Lepore_-_These_Truths_-_A_History_of_The_United_States_(retail)_(epub)",
-      "Lepore - These Truths - A Hoistory of the United States (2018)"
+      "Lepore - These Truths - A History of the United States (2018)"
     ],
   ]
 
 Here 2018 is the year where the book was published. It is not in the
 original string, but perhaps you know the information.
+
+If the book title contains a colon, like "These Truths: A History of the United
+States", then replace it with a dash, as in "These Truths - A History of the
+United States".
+
+If there are two authors, write both of their last names, separated with a
+comma. If there are more than two, only keep the first author's last name
+followed by "et al.", for example "Parshall et al. - Shattered Sword - The
+Untold Story of the Battle of Midway".
 
 Here are the directory names: {json.dumps(directory_names, indent=2)}
 
