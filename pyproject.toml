@@ -7,3 +7,6 @@ requires-python = ">=3.13"
 dependencies = [
     "openai>=1.68.2",
 ]
+
+[project.scripts]
+gpt-epub-rename = "rename:main"
