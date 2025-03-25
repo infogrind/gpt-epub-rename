@@ -1,17 +1,14 @@
-# /// script
-# requires-python = ">=3.13"
-# dependencies = [
-#     "openai",
-# ]
-# ///
 import os
 import json
 import argparse
 import sys
 from openai import OpenAI
 
-API_KEY_FILE = os.path.expanduser("~/.gpt_apikey")  # API key stored in the user's home directory
+API_KEY_FILE = os.path.expanduser(
+    "~/.gpt_apikey"
+)  # API key stored in the user's home directory
 debug = False  # Global debug flag
+
 
 def load_api_key():
     """Loads the API key from ~/.gpt_apikey, or prompts the user if missing."""
@@ -22,8 +19,9 @@ def load_api_key():
     print(f"⚠️ API key file '{API_KEY_FILE}' not found.")
     api_key = input("Enter your OpenAI API key: ").strip()
 
-    save_choice = input("Save this key to ~/.gpt_apikey for future use? (y/N):"
-                        ).strip().lower()
+    save_choice = (
+        input("Save this key to ~/.gpt_apikey for future use? (y/N):").strip().lower()
+    )
     if save_choice == "y":
         with open(API_KEY_FILE, "w") as f:
             f.write(api_key)
@@ -31,12 +29,15 @@ def load_api_key():
 
     return api_key
 
+
 client = OpenAI(api_key=load_api_key())
+
 
 def debug_print(message):
     """Print debug information to stderr if debug mode is enabled."""
     if debug:
         print(f"🔧 DEBUG: {message}", file=sys.stderr)
+
 
 def get_renamed_directories(directory_names):
     """Queries ChatGPT to get structured renaming suggestions."""
@@ -81,20 +82,26 @@ Return only a JSON list of tuples without any extra text or markdown."""
     debug_print("Sending request to OpenAI API")
     response = client.chat.completions.create(
         model="gpt-4o-mini",
-        messages=[{"role": "system", "content": "You are a helpful assistant."},
-                  {"role": "user", "content": prompt}])
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": prompt},
+        ],
+    )
 
     response_text = response.choices[0].message.content.strip()
     debug_print(f"Received response from OpenAI API: {len(response_text)} characters")
 
     try:
         result = json.loads(response_text)
-        debug_print(f"Successfully parsed JSON response with {len(result)} rename suggestions")
+        debug_print(
+            f"Successfully parsed JSON response with {len(result)} rename suggestions"
+        )
         return result
     except json.JSONDecodeError as e:
         print(f"❌ Error parsing API response: {e}", file=sys.stderr)
         debug_print(f"Raw API response: {response_text}")
         raise
+
 
 def rename_directories(base_paths, dry_run=False):
     """Processes directories and renames them according to ChatGPT suggestions."""
@@ -107,9 +114,11 @@ def rename_directories(base_paths, dry_run=False):
             print(f"Skipping: {base_path} (not a directory)")
             continue
 
-        subdirs = [os.path.join(base_path, d)
-                for d in os.listdir(base_path)
-                if os.path.isdir(os.path.join(base_path, d))]
+        subdirs = [
+            os.path.join(base_path, d)
+            for d in os.listdir(base_path)
+            if os.path.isdir(os.path.join(base_path, d))
+        ]
         debug_print(f"Found {len(subdirs)} subdirectories in {base_path}")
         all_dirs.extend(subdirs)
 
@@ -128,7 +137,9 @@ def rename_directories(base_paths, dry_run=False):
         old_path = next((d for d in all_dirs if os.path.basename(d) == old_name), None)
         if not old_path:
             print(f"⚠️ Skipping: {old_name} (not found)")
-            debug_print(f"Could not find directory with basename '{old_name}' in the list of directories")
+            debug_print(
+                f"Could not find directory with basename '{old_name}' in the list of directories"
+            )
             continue
 
         new_path = os.path.join(os.path.dirname(old_path), new_name)
@@ -147,17 +158,34 @@ def rename_directories(base_paths, dry_run=False):
             os.rename(old_path, new_path)
             print(f"✅ Renamed: {old_name} → {new_name}")
 
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Rename EPUB directories into a standardized format using ChatGPT.")
-    parser.add_argument("directories", nargs="+", help="One or more directories containing EPUB folders.")
-    parser.add_argument("--dry-run", action="store_true", help="Preview renaming without making changes.")
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode with detailed logging to stderr.")
+    parser = argparse.ArgumentParser(
+        description="Rename EPUB directories into a standardized format using ChatGPT."
+    )
+    parser.add_argument(
+        "directories",
+        nargs="+",
+        help="One or more directories containing EPUB folders.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview renaming without making changes.",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Enable debug mode with detailed logging to stderr.",
+    )
 
     args = parser.parse_args()
     debug = args.debug
 
     if debug:
-        print("🔧 Debug mode enabled - detailed information will be printed to stderr", file=sys.stderr)
+        print(
+            "🔧 Debug mode enabled - detailed information will be printed to stderr",
+            file=sys.stderr,
+        )
 
     rename_directories(args.directories, dry_run=args.dry_run)
-
