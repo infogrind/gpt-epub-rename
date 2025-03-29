@@ -88,7 +88,11 @@ Return only a JSON list of tuples without any extra text or markdown."""
         ],
     )
 
-    response_text = response.choices[0].message.content.strip()
+    response_content = response.choices[0].message.content
+    if response_content is None:
+        raise TypeError("No text content found in OpenAI response")
+
+    response_text = response_content.strip()
     debug_print(f"Received response from OpenAI API: {len(response_text)} characters")
 
     try:
