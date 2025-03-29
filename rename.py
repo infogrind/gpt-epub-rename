@@ -94,6 +94,7 @@ Return only a JSON list of tuples without any extra text or markdown."""
 
     response_text = response_content.strip()
     debug_print(f"Received response from OpenAI API: {len(response_text)} characters")
+    debug_print(f"Response contents: {response_text}")
 
     try:
         result = json.loads(response_text)
@@ -184,6 +185,7 @@ def main():
     )
 
     args = parser.parse_args()
+    global debug
     debug = args.debug
 
     if debug:
