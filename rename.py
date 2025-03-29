@@ -163,7 +163,7 @@ def rename_directories(base_paths, dry_run=False):
             print(f"✅ Renamed: {old_name} → {new_name}")
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(
         description="Rename EPUB directories into a standardized format using ChatGPT."
     )
@@ -193,3 +193,7 @@ if __name__ == "__main__":
         )
 
     rename_directories(args.directories, dry_run=args.dry_run)
+
+
+if __name__ == "__main__":
+    main()
