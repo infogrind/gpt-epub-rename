@@ -110,29 +110,15 @@ Return only a JSON list of tuples without any extra text or markdown."""
 
 def rename_directories(directories, dry_run=False):
     """Processes directories and renames them according to ChatGPT suggestions."""
-    all_dirs = []
-
-    debug_print(f"Processing {len(directories)} input directories")
-    for directory in directories:
-        debug_print(f"Checking directory: {directory}")
-        if not os.path.isdir(directory):
-            print(f"Skipping: {directory} (not a directory)")
-            continue
-        all_dirs.append(directory)
-
-    if not all_dirs:
-        print("❌ No valid directories found.")
-        return
-
-    debug_print(f"Total directories to process: {len(all_dirs)}")
-    old_names = [os.path.basename(d) for d in all_dirs]
+    debug_print(f"Total directories to process: {len(directories)}")
+    old_names = [os.path.basename(d) for d in directories]
     debug_print(f"Extracted {len(old_names)} directory basenames")
     rename_pairs = get_renamed_directories(old_names)
 
     debug_print(f"Processing {len(rename_pairs)} rename pairs")
     for old_name, new_name in rename_pairs:
         debug_print(f"Processing rename: {old_name} → {new_name}")
-        old_path = next((d for d in all_dirs if os.path.basename(d) == old_name), None)
+        old_path = next((d for d in directories if os.path.basename(d) == old_name), None)
         if not old_path:
             print(f"⚠️ Skipping: {old_name} (not found)")
             debug_print(
@@ -197,10 +183,15 @@ def main():
             file=sys.stderr,
         )
 
-    directories_to_rename = args.directories
+    directories_to_rename = []
     if args.parent_directory:
-        if not os.path.isdir(args.parent_directory):
+        if not os.path.exists(args.parent_directory):
             print(f"❌ Error: Directory '{args.parent_directory}' not found.")
+            sys.exit(1)
+        if not os.path.isdir(args.parent_directory):
+            print(
+                f"❌ Error: '{args.parent_directory}' exists but is not a directory."
+            )
             sys.exit(1)
         subdirs = [
             os.path.join(args.parent_directory, d)
@@ -209,9 +200,14 @@ def main():
         ]
         directories_to_rename.extend(subdirs)
 
+    for directory in args.directories:
+        if os.path.isdir(directory):
+            directories_to_rename.append(directory)
+        else:
+            print(f"Skipping: {directory} (not a directory)")
+
     if not directories_to_rename:
-        print("❌ No directories specified. Use positional arguments or the -d option.")
-        parser.print_help()
+        print("❌ No valid directories found to rename.")
         sys.exit(1)
 
     rename_directories(directories_to_rename, dry_run=args.dry_run)
