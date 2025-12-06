@@ -1,0 +1,96 @@
+import os
+import shutil
+import unittest
+from unittest.mock import patch, MagicMock
+from io import StringIO
+import sys
+from rename import main
+
+class TestRenameScript(unittest.TestCase):
+    def setUp(self):
+        self.test_dir = "test_rename_dir"
+        os.makedirs(self.test_dir, exist_ok=True)
+        self.sub_dir1 = os.path.join(self.test_dir, "sub_dir1")
+        self.sub_dir2 = os.path.join(self.test_dir, "sub_dir2")
+        os.makedirs(self.sub_dir1, exist_ok=True)
+        os.makedirs(self.sub_dir2, exist_ok=True)
+        self.original_stdout = sys.stdout
+        self.original_stderr = sys.stderr
+        sys.stdout = self.captured_stdout = StringIO()
+        sys.stderr = self.captured_stderr = StringIO()
+
+    def tearDown(self):
+        shutil.rmtree(self.test_dir)
+        sys.stdout = self.original_stdout
+        sys.stderr = self.original_stderr
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_with_d_option(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["sub_dir1", "new_dir1"], ["sub_dir2", "new_dir2"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        # Run the main function with arguments
+        with patch.object(sys, 'argv', ['rename.py', '-d', self.test_dir, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+        self.assertIn("Dry Run: sub_dir2 → new_dir2", output)
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_with_direct_args(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["sub_dir1", "new_dir1"], ["sub_dir2", "new_dir2"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        # Run the main function with arguments
+        with patch.object(sys, 'argv', ['rename.py', self.sub_dir1, self.sub_dir2, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+        self.assertIn("Dry Run: sub_dir2 → new_dir2", output)
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_with_both_args(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["sub_dir1", "new_dir1"], ["sub_dir2", "new_dir2"], ["another_dir", "new_another_dir"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        another_dir = os.path.join(self.test_dir, "another_dir")
+        os.makedirs(another_dir, exist_ok=True)
+
+        # Run the main function with arguments
+        with patch.object(sys, 'argv', ['rename.py', another_dir, '-d', self.test_dir, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+        self.assertIn("Dry Run: sub_dir2 → new_dir2", output)
+        self.assertIn("Dry Run: another_dir → new_another_dir", output)
+
+
+if __name__ == "__main__":
+    unittest.main()
