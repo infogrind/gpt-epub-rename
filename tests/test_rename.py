@@ -91,6 +91,31 @@ class TestRenameScript(unittest.TestCase):
         self.assertIn("Dry Run: sub_dir2 → new_dir2", output)
         self.assertIn("Dry Run: another_dir → new_another_dir", output)
 
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_invalid_d_option_is_file(self, mock_openai, mock_load_api_key):
+        file_path = os.path.join(self.test_dir, "test_file.txt")
+        with open(file_path, "w") as f:
+            f.write("test")
+
+        with patch.object(sys, 'argv', ['rename.py', '-d', file_path]):
+            with self.assertRaises(SystemExit) as cm:
+                main()
+        self.assertEqual(cm.exception.code, 1)
+
+        output = self.captured_stdout.getvalue()
+        self.assertIn(f"Error: '{file_path}' exists but is not a directory.", output)
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_no_valid_directories(self, mock_openai, mock_load_api_key):
+        with patch.object(sys, 'argv', ['rename.py', 'non_existent_dir']):
+            with self.assertRaises(SystemExit) as cm:
+                main()
+        self.assertEqual(cm.exception.code, 1)
+
+        output = self.captured_stdout.getvalue()
+        self.assertIn("No valid directories found to rename.", output)
 
 if __name__ == "__main__":
     unittest.main()
