@@ -30,7 +30,7 @@ def load_api_key():
     return api_key
 
 
-client = OpenAI(api_key=load_api_key())
+client = None  # Will be initialized in main()
 
 
 def debug_print(message):
@@ -108,24 +108,17 @@ Return only a JSON list of tuples without any extra text or markdown."""
         raise
 
 
-def rename_directories(base_paths, dry_run=False):
+def rename_directories(directories, dry_run=False):
     """Processes directories and renames them according to ChatGPT suggestions."""
     all_dirs = []
 
-    debug_print(f"Processing {len(base_paths)} input directories")
-    for base_path in base_paths:
-        debug_print(f"Checking directory: {base_path}")
-        if not os.path.isdir(base_path):
-            print(f"Skipping: {base_path} (not a directory)")
+    debug_print(f"Processing {len(directories)} input directories")
+    for directory in directories:
+        debug_print(f"Checking directory: {directory}")
+        if not os.path.isdir(directory):
+            print(f"Skipping: {directory} (not a directory)")
             continue
-
-        subdirs = [
-            os.path.join(base_path, d)
-            for d in os.listdir(base_path)
-            if os.path.isdir(os.path.join(base_path, d))
-        ]
-        debug_print(f"Found {len(subdirs)} subdirectories in {base_path}")
-        all_dirs.extend(subdirs)
+        all_dirs.append(directory)
 
     if not all_dirs:
         print("❌ No valid directories found.")
@@ -170,8 +163,15 @@ def main():
     )
     parser.add_argument(
         "directories",
-        nargs="+",
-        help="One or more directories containing EPUB folders.",
+        nargs="*",
+        default=[],
+        help="One or more directories to rename.",
+    )
+    parser.add_argument(
+        "-d",
+        "--directory",
+        dest="parent_directory",
+        help="A directory containing subdirectories to rename.",
     )
     parser.add_argument(
         "--dry-run",
@@ -188,13 +188,33 @@ def main():
     global debug
     debug = args.debug
 
+    global client
+    client = OpenAI(api_key=load_api_key())
+
     if debug:
         print(
             "🔧 Debug mode enabled - detailed information will be printed to stderr",
             file=sys.stderr,
         )
 
-    rename_directories(args.directories, dry_run=args.dry_run)
+    directories_to_rename = args.directories
+    if args.parent_directory:
+        if not os.path.isdir(args.parent_directory):
+            print(f"❌ Error: Directory '{args.parent_directory}' not found.")
+            sys.exit(1)
+        subdirs = [
+            os.path.join(args.parent_directory, d)
+            for d in os.listdir(args.parent_directory)
+            if os.path.isdir(os.path.join(args.parent_directory, d))
+        ]
+        directories_to_rename.extend(subdirs)
+
+    if not directories_to_rename:
+        print("❌ No directories specified. Use positional arguments or the -d option.")
+        parser.print_help()
+        sys.exit(1)
+
+    rename_directories(directories_to_rename, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
