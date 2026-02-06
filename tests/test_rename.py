@@ -117,5 +117,48 @@ class TestRenameScript(unittest.TestCase):
         output = self.captured_stdout.getvalue()
         self.assertIn("No valid directories found to rename.", output)
 
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_with_trailing_slash(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["sub_dir1", "new_dir1"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        # Run the main function with a directory argument that has a trailing slash
+        dir_with_slash = self.sub_dir1 + os.sep
+        with patch.object(sys, 'argv', ['rename.py', dir_with_slash, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        # If it handles trailing slash correctly, it should find 'sub_dir1' as basename
+        self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_with_multiple_trailing_slashes(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["sub_dir1", "new_dir1"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        # Run the main function with a directory argument that has multiple trailing slashes
+        dir_with_slashes = self.sub_dir1 + os.sep + os.sep + os.sep
+        with patch.object(sys, 'argv', ['rename.py', dir_with_slashes, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+
 if __name__ == "__main__":
     unittest.main()

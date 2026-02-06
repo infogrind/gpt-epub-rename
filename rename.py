@@ -111,6 +111,8 @@ Return only a JSON list of tuples without any extra text or markdown."""
 def rename_directories(directories, dry_run=False):
     """Processes directories and renames them according to ChatGPT suggestions."""
     debug_print(f"Total directories to process: {len(directories)}")
+    # Remove trailing slashes to ensure os.path.basename returns the directory name
+    directories = [d.rstrip(os.sep) for d in directories]
     old_names = [os.path.basename(d) for d in directories]
     debug_print(f"Extracted {len(old_names)} directory basenames")
     rename_pairs = get_renamed_directories(old_names)
