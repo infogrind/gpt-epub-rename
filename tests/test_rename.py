@@ -108,14 +108,40 @@ class TestRenameScript(unittest.TestCase):
 
     @patch("rename.load_api_key", return_value="fake_api_key")
     @patch("rename.OpenAI")
-    def test_no_valid_directories(self, mock_openai, mock_load_api_key):
+    def test_no_valid_items(self, mock_openai, mock_load_api_key):
         with patch.object(sys, 'argv', ['rename.py', 'non_existent_dir']):
             with self.assertRaises(SystemExit) as cm:
                 main()
         self.assertEqual(cm.exception.code, 1)
 
         output = self.captured_stdout.getvalue()
-        self.assertIn("No valid directories found to rename.", output)
+        self.assertIn("No valid directories or EPUB files found to rename.", output)
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_with_epub_files(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["book1.epub", "Author - Title1 (2020)"], ["sub_dir1", "Author - Title2 (2021)"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        # Create an EPUB file in the test directory
+        epub_path = os.path.join(self.test_dir, "book1.epub")
+        with open(epub_path, "w") as f:
+            f.write("fake epub content")
+
+        # Run the main function with the directory containing both a file and a directory
+        with patch.object(sys, 'argv', ['rename.py', '-d', self.test_dir, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        self.assertIn("Dry Run: book1.epub → Author - Title1 (2020)/Author - Title1 (2020).epub", output)
+        self.assertIn("Dry Run: sub_dir1 → Author - Title2 (2021)", output)
 
     @patch("rename.load_api_key", return_value="fake_api_key")
     @patch("rename.OpenAI")
@@ -159,6 +185,31 @@ class TestRenameScript(unittest.TestCase):
         # Check the output
         output = self.captured_stdout.getvalue()
         self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+
+    @patch("rename.load_api_key", return_value="fake_api_key")
+    @patch("rename.OpenAI")
+    def test_rename_positional_epub_file(self, mock_openai, mock_load_api_key):
+        # Mock the OpenAI client and its response
+        mock_client = MagicMock()
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message = MagicMock()
+        mock_response.choices[0].message.content = '[["standalone.epub", "Author - Title (2022)"]]'
+        mock_client.chat.completions.create.return_value = mock_response
+        mock_openai.return_value = mock_client
+
+        # Create a standalone EPUB file
+        epub_path = os.path.join(self.test_dir, "standalone.epub")
+        with open(epub_path, "w") as f:
+            f.write("fake epub content")
+
+        # Run the main function with the EPUB file as a positional argument
+        with patch.object(sys, 'argv', ['rename.py', epub_path, '--dry-run']):
+            main()
+
+        # Check the output
+        output = self.captured_stdout.getvalue()
+        self.assertIn("Dry Run: standalone.epub → Author - Title (2022)/Author - Title (2022).epub", output)
 
 if __name__ == "__main__":
     unittest.main()

@@ -39,18 +39,19 @@ def debug_print(message):
         print(f"🔧 DEBUG: {message}", file=sys.stderr)
 
 
-def get_renamed_directories(directory_names):
+def get_renaming_suggestions(item_names):
     """Queries ChatGPT to get structured renaming suggestions."""
 
-    debug_print(f"Preparing to query OpenAI API for {len(directory_names)} directories")
-    prompt = f"""This is a list of names of directories containing EPUB files.
-The goal is to rename the directories into a standardized structure. Each
-directory name normally contains a title and its author, along with unimportant
+    debug_print(f"Preparing to query OpenAI API for {len(item_names)} items")
+    prompt = f"""This is a list of names of directories or EPUB files.
+The goal is to rename them into a standardized structure. Each
+name normally contains a title and its author, along with unimportant
 terms like epub or xpost or retail. Please extract the author and title from
 each line, and return in structured JSON format instructions that my script can
 use for renaming. The JSON should contain a list where each element is a list with two elements, where
-the first element has the original directory name and the second field has
+the first element has the original name and the second field has
 the form "Lastname - Title (year)", where "Lastname" is the last name of the author.
+Do NOT include a file extension in the suggested name.
 
 Example: if the single input is
 "Jill_Lepore_-_These_Truths_-_A_History_of_The_United_States_(retail)_(epub)",
@@ -75,7 +76,7 @@ comma. If there are more than two, only keep the first author's last name
 followed by "et al.", for example "Parshall et al. - Shattered Sword - The
 Untold Story of the Battle of Midway".
 
-Here are the directory names: {json.dumps(directory_names, indent=2)}
+Here are the names: {json.dumps(item_names, indent=2)}
 
 Return only a JSON list of tuples without any extra text or markdown."""
 
@@ -108,41 +109,54 @@ Return only a JSON list of tuples without any extra text or markdown."""
         raise
 
 
-def rename_directories(directories, dry_run=False):
-    """Processes directories and renames them according to ChatGPT suggestions."""
-    debug_print(f"Total directories to process: {len(directories)}")
-    # Remove trailing slashes to ensure os.path.basename returns the directory name
-    directories = [d.rstrip(os.sep) for d in directories]
-    old_names = [os.path.basename(d) for d in directories]
-    debug_print(f"Extracted {len(old_names)} directory basenames")
-    rename_pairs = get_renamed_directories(old_names)
+def rename_items(items, dry_run=False):
+    """Processes directories and EPUB files, and renames them according to ChatGPT suggestions."""
+    debug_print(f"Total items to process: {len(items)}")
+    # Remove trailing slashes to ensure os.path.basename returns the name
+    items = [i.rstrip(os.sep) for i in items]
+    old_names = [os.path.basename(i) for i in items]
+    debug_print(f"Extracted {len(old_names)} item basenames")
+    rename_pairs = get_renaming_suggestions(old_names)
 
     debug_print(f"Processing {len(rename_pairs)} rename pairs")
     for old_name, new_name in rename_pairs:
         debug_print(f"Processing rename: {old_name} → {new_name}")
-        old_path = next((d for d in directories if os.path.basename(d) == old_name), None)
+        old_path = next((i for i in items if os.path.basename(i) == old_name), None)
         if not old_path:
             print(f"⚠️ Skipping: {old_name} (not found)")
-            debug_print(
-                f"Could not find directory with basename '{old_name}' in the list of directories"
-            )
             continue
 
-        new_path = os.path.join(os.path.dirname(old_path), new_name)
-        debug_print(f"Full paths: {old_path} → {new_path}")
+        base_dir = os.path.dirname(old_path)
+        new_path = os.path.join(base_dir, new_name)
 
-        if os.path.exists(new_path):
-            print(f"⚠️ Skipping: {old_name} → {new_name} (target already exists)")
-            debug_print(f"Target path already exists: {new_path}")
-            continue
+        if os.path.isfile(old_path) and old_path.lower().endswith(".epub"):
+            # If it's an EPUB file, we create a directory and move the file into it
+            new_file_path = os.path.join(new_path, new_name + ".epub")
+            debug_print(f"File move: {old_path} → {new_file_path}")
 
-        if dry_run:
-            print(f"🔍 Dry Run: {old_name} → {new_name}")
-            debug_print("Skipping actual rename operation due to --dry-run")
+            if os.path.exists(new_path):
+                print(f"⚠️ Skipping: {old_name} → {new_name} (target directory already exists)")
+                continue
+
+            if dry_run:
+                print(f"🔍 Dry Run: {old_name} → {new_name}/{new_name}.epub")
+            else:
+                os.makedirs(new_path)
+                os.rename(old_path, new_file_path)
+                print(f"✅ Renamed and moved: {old_name} → {new_name}/{new_name}.epub")
         else:
-            debug_print(f"Renaming directory: {old_path} → {new_path}")
-            os.rename(old_path, new_path)
-            print(f"✅ Renamed: {old_name} → {new_name}")
+            # If it's a directory, we just rename it
+            debug_print(f"Directory rename: {old_path} → {new_path}")
+
+            if os.path.exists(new_path):
+                print(f"⚠️ Skipping: {old_name} → {new_name} (target already exists)")
+                continue
+
+            if dry_run:
+                print(f"🔍 Dry Run: {old_name} → {new_name}")
+            else:
+                os.rename(old_path, new_path)
+                print(f"✅ Renamed: {old_name} → {new_name}")
 
 
 def main():
@@ -185,7 +199,7 @@ def main():
             file=sys.stderr,
         )
 
-    directories_to_rename = []
+    items_to_rename = []
     if args.parent_directory:
         if not os.path.exists(args.parent_directory):
             print(f"❌ Error: Directory '{args.parent_directory}' not found.")
@@ -195,24 +209,27 @@ def main():
                 f"❌ Error: '{args.parent_directory}' exists but is not a directory."
             )
             sys.exit(1)
-        subdirs = [
-            os.path.join(args.parent_directory, d)
-            for d in os.listdir(args.parent_directory)
-            if os.path.isdir(os.path.join(args.parent_directory, d))
-        ]
-        directories_to_rename.extend(subdirs)
+        
+        for d in os.listdir(args.parent_directory):
+            full_path = os.path.join(args.parent_directory, d)
+            if os.path.isdir(full_path):
+                items_to_rename.append(full_path)
+            elif os.path.isfile(full_path) and full_path.lower().endswith(".epub"):
+                items_to_rename.append(full_path)
 
-    for directory in args.directories:
-        if os.path.isdir(directory):
-            directories_to_rename.append(directory)
+    for item in args.directories:
+        if os.path.isdir(item):
+            items_to_rename.append(item)
+        elif os.path.isfile(item) and item.lower().endswith(".epub"):
+            items_to_rename.append(item)
         else:
-            print(f"Skipping: {directory} (not a directory)")
+            print(f"Skipping: {item} (not a directory or EPUB file)")
 
-    if not directories_to_rename:
-        print("❌ No valid directories found to rename.")
+    if not items_to_rename:
+        print("❌ No valid directories or EPUB files found to rename.")
         sys.exit(1)
 
-    rename_directories(directories_to_rename, dry_run=args.dry_run)
+    rename_items(items_to_rename, dry_run=args.dry_run)
 
 
 if __name__ == "__main__":
