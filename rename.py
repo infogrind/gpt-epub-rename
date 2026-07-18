@@ -1,36 +1,46 @@
-import os
-import json
 import argparse
+import json
+import os
 import sys
+import tomllib
+
+import anthropic
+from anthropic import Anthropic
 from openai import OpenAI
 
-API_KEY_FILE = os.path.expanduser(
-    "~/.gpt_apikey"
-)  # API key stored in the user's home directory
+CONFIG_FILE = os.path.expanduser("~/.config/gpt-epub-rename/config.toml")
+LEGACY_OPENAI_KEY_FILE = os.path.expanduser("~/.gpt_apikey")
+
+DEFAULT_CONFIG = """\
+# Configuration for gpt-epub-rename.
+#
+# provider: which LLM API to use for renaming suggestions.
+#   "anthropic" — Claude via the Anthropic API
+#   "openai"    — ChatGPT via the OpenAI API
+provider = "anthropic"
+
+[anthropic]
+model = "claude-opus-4-8"
+# The API key is resolved in this order:
+#   1. api_key below
+#   2. the file named by api_key_file
+#   3. the ANTHROPIC_API_KEY environment variable, or an `ant auth login` profile
+# api_key = "sk-ant-..."
+# api_key_file = "~/.anthropic_apikey"
+
+[openai]
+model = "gpt-4o-mini"
+# Key resolution: api_key, then api_key_file, then the OPENAI_API_KEY
+# environment variable, then an interactive prompt.
+api_key_file = "~/.gpt_apikey"
+"""
+
 debug = False  # Global debug flag
 
-
-def load_api_key():
-    """Loads the API key from ~/.gpt_apikey, or prompts the user if missing."""
-    if os.path.exists(API_KEY_FILE):
-        with open(API_KEY_FILE, "r") as f:
-            return f.read().strip()
-
-    print(f"⚠️ API key file '{API_KEY_FILE}' not found.")
-    api_key = input("Enter your OpenAI API key: ").strip()
-
-    save_choice = (
-        input("Save this key to ~/.gpt_apikey for future use? (y/N):").strip().lower()
-    )
-    if save_choice == "y":
-        with open(API_KEY_FILE, "w") as f:
-            f.write(api_key)
-            print(f"✅ API key saved to {API_KEY_FILE}")
-
-    return api_key
-
-
-client = None  # Will be initialized in main()
+# Set in main() from the config file
+provider = None
+client = None
+model = None
 
 
 def debug_print(message):
@@ -39,10 +49,138 @@ def debug_print(message):
         print(f"🔧 DEBUG: {message}", file=sys.stderr)
 
 
-def get_renaming_suggestions(item_names):
-    """Queries ChatGPT to get structured renaming suggestions."""
+def load_config():
+    """Loads the TOML config, creating a commented default on first run."""
+    if not os.path.exists(CONFIG_FILE):
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        with open(CONFIG_FILE, "w") as f:
+            f.write(DEFAULT_CONFIG)
+        print(
+            f"📝 Created default config at {CONFIG_FILE} — "
+            "edit it to change the provider or model."
+        )
+    with open(CONFIG_FILE, "rb") as f:
+        return tomllib.load(f)
 
-    debug_print(f"Preparing to query OpenAI API for {len(item_names)} items")
+
+def read_key_file(path):
+    """Returns the stripped contents of a key file, or None if unset/missing."""
+    if not path:
+        return None
+    path = os.path.expanduser(path)
+    if not os.path.exists(path):
+        return None
+    with open(path, "r") as f:
+        return f.read().strip()
+
+
+def load_api_key():
+    """Legacy OpenAI flow: read ~/.gpt_apikey, or prompt the user."""
+    key = read_key_file(LEGACY_OPENAI_KEY_FILE)
+    if key:
+        return key
+
+    print(f"⚠️ API key file '{LEGACY_OPENAI_KEY_FILE}' not found.")
+    api_key = input("Enter your OpenAI API key: ").strip()
+
+    save_choice = (
+        input("Save this key to ~/.gpt_apikey for future use? (y/N):").strip().lower()
+    )
+    if save_choice == "y":
+        with open(LEGACY_OPENAI_KEY_FILE, "w") as f:
+            f.write(api_key)
+            print(f"✅ API key saved to {LEGACY_OPENAI_KEY_FILE}")
+
+    return api_key
+
+
+def create_client(config):
+    """Creates the LLM client for the configured provider.
+
+    Returns a (provider, client, model) tuple.
+    """
+    chosen = config.get("provider", "anthropic")
+    section = config.get(chosen, {})
+    api_key = section.get("api_key") or read_key_file(section.get("api_key_file"))
+
+    if chosen == "anthropic":
+        chosen_model = section.get("model", "claude-opus-4-8")
+        # With no explicit key the SDK resolves ANTHROPIC_API_KEY or an
+        # `ant auth login` profile on its own.
+        llm = Anthropic(api_key=api_key) if api_key else Anthropic()
+    elif chosen == "openai":
+        chosen_model = section.get("model", "gpt-4o-mini")
+        if not api_key and not os.environ.get("OPENAI_API_KEY"):
+            api_key = load_api_key()
+        llm = OpenAI(api_key=api_key) if api_key else OpenAI()
+    else:
+        print(
+            f"❌ Error: unknown provider '{chosen}' in {CONFIG_FILE} "
+            '(expected "anthropic" or "openai").'
+        )
+        sys.exit(1)
+
+    debug_print(f"Using provider '{chosen}' with model '{chosen_model}'")
+    return chosen, llm, chosen_model
+
+
+def auth_error(detail):
+    """Prints a friendly authentication error and exits."""
+    print(f"❌ Authentication with the {provider} API failed: {detail}", file=sys.stderr)
+    print(
+        f"   Set api_key or api_key_file in the [{provider}] section of "
+        f"{CONFIG_FILE}, or export the provider's API key environment variable.",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
+def query_model(prompt):
+    """Sends the prompt to the configured provider and returns the text reply."""
+    if provider == "anthropic":
+        try:
+            response = client.messages.create(
+                model=model,
+                max_tokens=16000,
+                messages=[{"role": "user", "content": prompt}],
+            )
+        except TypeError as e:
+            # The SDK raises TypeError when no credentials can be resolved
+            if "authentication" in str(e).lower():
+                auth_error("no API key found")
+            raise
+        except anthropic.AuthenticationError as e:
+            auth_error(e.message)
+        if response.stop_reason == "refusal":
+            raise RuntimeError("The model refused to answer the request")
+        text = "".join(b.text for b in response.content if b.type == "text")
+    else:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt},
+            ],
+        )
+        text = response.choices[0].message.content
+        if text is None:
+            raise TypeError("No text content found in OpenAI response")
+    return text.strip()
+
+
+def parse_json_reply(text):
+    """Parses a JSON reply, tolerating a markdown code fence around it."""
+    if text.startswith("```"):
+        first_newline = text.index("\n") if "\n" in text else len(text)
+        text = text[first_newline + 1 :]
+        text = text.rstrip().removesuffix("```").rstrip()
+    return json.loads(text)
+
+
+def get_renaming_suggestions(item_names):
+    """Queries the configured LLM to get structured renaming suggestions."""
+
+    debug_print(f"Preparing to query the {provider} API for {len(item_names)} items")
     prompt = f"""This is a list of names of directories or EPUB files.
 The goal is to rename them into a standardized structure. Each
 name normally contains a title and its author, along with unimportant
@@ -80,25 +218,13 @@ Here are the names: {json.dumps(item_names, indent=2)}
 
 Return only a JSON list of tuples without any extra text or markdown."""
 
-    debug_print("Sending request to OpenAI API")
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt},
-        ],
-    )
-
-    response_content = response.choices[0].message.content
-    if response_content is None:
-        raise TypeError("No text content found in OpenAI response")
-
-    response_text = response_content.strip()
-    debug_print(f"Received response from OpenAI API: {len(response_text)} characters")
+    debug_print(f"Sending request to the {provider} API")
+    response_text = query_model(prompt)
+    debug_print(f"Received response: {len(response_text)} characters")
     debug_print(f"Response contents: {response_text}")
 
     try:
-        result = json.loads(response_text)
+        result = parse_json_reply(response_text)
         debug_print(
             f"Successfully parsed JSON response with {len(result)} rename suggestions"
         )
@@ -110,7 +236,7 @@ Return only a JSON list of tuples without any extra text or markdown."""
 
 
 def rename_items(items, dry_run=False):
-    """Processes directories and EPUB files, and renames them according to ChatGPT suggestions."""
+    """Processes directories and EPUB files, and renames them according to LLM suggestions."""
     debug_print(f"Total items to process: {len(items)}")
     # Remove trailing slashes to ensure os.path.basename returns the name
     items = [i.rstrip(os.sep) for i in items]
@@ -161,7 +287,7 @@ def rename_items(items, dry_run=False):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rename EPUB directories into a standardized format using ChatGPT."
+        description="Rename EPUB directories into a standardized format using an LLM."
     )
     parser.add_argument(
         "directories",
@@ -190,14 +316,14 @@ def main():
     global debug
     debug = args.debug
 
-    global client
-    client = OpenAI(api_key=load_api_key())
-
     if debug:
         print(
             "🔧 Debug mode enabled - detailed information will be printed to stderr",
             file=sys.stderr,
         )
+
+    global provider, client, model
+    provider, client, model = create_client(load_config())
 
     items_to_rename = []
     if args.parent_directory:
@@ -209,7 +335,7 @@ def main():
                 f"❌ Error: '{args.parent_directory}' exists but is not a directory."
             )
             sys.exit(1)
-        
+
         for d in os.listdir(args.parent_directory):
             full_path = os.path.join(args.parent_directory, d)
             if os.path.isdir(full_path):
