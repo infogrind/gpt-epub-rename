@@ -5,6 +5,7 @@ import sys
 import tomllib
 
 import anthropic
+import openai
 from anthropic import Anthropic
 from openai import OpenAI
 
@@ -135,6 +136,12 @@ def auth_error(detail):
     sys.exit(1)
 
 
+def api_error(detail):
+    """Prints a friendly API error and exits."""
+    print(f"❌ The {provider} API returned an error: {detail}", file=sys.stderr)
+    sys.exit(1)
+
+
 def query_model(prompt):
     """Sends the prompt to the configured provider and returns the text reply."""
     if provider == "anthropic":
@@ -151,17 +158,28 @@ def query_model(prompt):
             raise
         except anthropic.AuthenticationError as e:
             auth_error(e.message)
+        except anthropic.APIConnectionError:
+            api_error("could not connect — check your network")
+        except anthropic.APIStatusError as e:
+            api_error(e.message)
         if response.stop_reason == "refusal":
             raise RuntimeError("The model refused to answer the request")
         text = "".join(b.text for b in response.content if b.type == "text")
     else:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt},
-            ],
-        )
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+        except openai.AuthenticationError as e:
+            auth_error(getattr(e, "message", str(e)))
+        except openai.APIConnectionError:
+            api_error("could not connect — check your network")
+        except openai.APIStatusError as e:
+            api_error(getattr(e, "message", str(e)))
         text = response.choices[0].message.content
         if text is None:
             raise TypeError("No text content found in OpenAI response")

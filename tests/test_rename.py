@@ -4,6 +4,11 @@ import unittest
 from unittest.mock import patch, MagicMock
 from io import StringIO
 import sys
+
+import anthropic
+import httpx
+import openai
+
 from rename import main
 
 OPENAI_CONFIG = {
@@ -217,6 +222,50 @@ class TestRenameScript(unittest.TestCase):
 
         output = self.captured_stdout.getvalue()
         self.assertIn("Dry Run: sub_dir1 → new_dir1", output)
+
+    @patch("rename.load_config", return_value=ANTHROPIC_CONFIG)
+    @patch("rename.Anthropic")
+    def test_anthropic_api_error_shows_nice_message(self, mock_anthropic, mock_load_config):
+        message = "Your credit balance is too low to access the Anthropic API."
+        response = httpx.Response(
+            400, request=httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+        )
+        mock_client = MagicMock()
+        mock_client.messages.create.side_effect = anthropic.BadRequestError(
+            message, response=response, body=None
+        )
+        mock_anthropic.return_value = mock_client
+
+        with patch.object(sys, 'argv', ['rename.py', self.sub_dir1, '--dry-run']):
+            with self.assertRaises(SystemExit) as cm:
+                main()
+        self.assertEqual(cm.exception.code, 1)
+
+        errors = self.captured_stderr.getvalue()
+        self.assertIn("credit balance is too low", errors)
+        self.assertNotIn("Traceback", errors)
+
+    @patch("rename.load_config", return_value=OPENAI_CONFIG)
+    @patch("rename.OpenAI")
+    def test_openai_api_error_shows_nice_message(self, mock_openai, mock_load_config):
+        message = "You exceeded your current quota."
+        response = httpx.Response(
+            429, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+        )
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.side_effect = openai.RateLimitError(
+            message, response=response, body=None
+        )
+        mock_openai.return_value = mock_client
+
+        with patch.object(sys, 'argv', ['rename.py', self.sub_dir1, '--dry-run']):
+            with self.assertRaises(SystemExit) as cm:
+                main()
+        self.assertEqual(cm.exception.code, 1)
+
+        errors = self.captured_stderr.getvalue()
+        self.assertIn("exceeded your current quota", errors)
+        self.assertNotIn("Traceback", errors)
 
     @patch("rename.load_config", return_value={"provider": "gemini"})
     def test_unknown_provider(self, mock_load_config):
